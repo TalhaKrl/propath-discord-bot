@@ -81,17 +81,22 @@ client.on('interactionCreate', async (interaction) => {
   const displayName =
     member.nickname || member.user.globalName || member.user.username;
 
-  // 1) Zaten bir 1:1 text channel'ı var mı?
-  const existingChannel = guild.channels.cache.find(
+  // --- 1) TÜM KANALLARI FETCH ET VE VAR OLAN 1:1 TEXT CHANNEL'I BUL ---
+  const allChannels = await guild.channels.fetch(); // cache yerine API'den taze liste
+  const existingTextChannel = [...allChannels.values()].find(
     (ch) =>
+      ch &&
       ch.type === ChannelType.GuildText &&
       ch.topic &&
       ch.topic.startsWith(`MENTEE_${member.id}`)
   );
 
-  if (existingChannel) {
+  if (existingTextChannel) {
+    console.log(
+      `Existing 1:1 channel found for ${member.id}: ${existingTextChannel.name}`
+    );
     await interaction.reply({
-      content: `You already have a 1:1 channel: ${existingChannel}.`,
+      content: `You already have a 1:1 channel: ${existingTextChannel}.`,
       ephemeral: true
     });
     return;
