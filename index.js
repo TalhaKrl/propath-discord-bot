@@ -1,14 +1,14 @@
 require('dotenv').config();
 
-const { 
-  Client, 
-  GatewayIntentBits, 
-  Partials, 
-  ChannelType, 
+const {
+  Client,
+  GatewayIntentBits,
+  Partials,
+  ChannelType,
   PermissionsBitField,
   ActionRowBuilder,
   ButtonBuilder,
-  ButtonStyle 
+  ButtonStyle
 } = require('discord.js');
 
 const client = new Client({
@@ -20,8 +20,9 @@ const client = new Client({
   partials: [Partials.Channel, Partials.GuildMember, Partials.Message]
 });
 
-// === CONFIG ===
-const GUILD_ID = '1463759149585141828';          // Server
+// ==== CONFIG ====
+
+const GUILD_ID = '1463759149585141828';          // ProPath sunucusu
 const WELCOME_CHANNEL_ID = '1475341839493238945'; // #welcome-start-here
 
 const MENTEE_ROLE_ID = '1475669096082440333';       // Mentee
@@ -29,7 +30,8 @@ const MENTOR_ROLE_ID = '1475668627570036786';       // Mentor = Caseworker
 const CASEWORKER_ROLE_ID = '1475668627570036786';   // Caseworker
 const ADMIN_ROLE_ID = '1475668109372424275';        // Admin
 
-// === ON READY: SEND WELCOME MESSAGE WITH BUTTON ===
+// ==== READY: welcome mesajı (duplicate korumalı) ====
+
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
@@ -43,13 +45,31 @@ client.once('ready', async () => {
       .setStyle(ButtonStyle.Primary)
   );
 
+  // Kanaldaki son mesajlara bak: bot daha önce butonlu mesaj göndermiş mi?
+  const messages = await channel.messages.fetch({ limit: 50 });
+  const existing = messages.find(
+    (m) =>
+      m.author.id === client.user.id &&
+      m.components.length > 0 &&
+      m.components[0].components.some(
+        (c) => c.customId === 'propath_join'
+      )
+  );
+
+  if (existing) {
+    console.log('Welcome message already exists, not sending a new one.');
+    return;
+  }
+
   await channel.send({
-    content: 'Welcome to ProPath! 🎓\n\nClick the button below to create your private 1:1 mentorship channel.',
+    content:
+      'Welcome to ProPath! 🎓\n\nClick the button below to create your private 1:1 mentorship channel.',
     components: [row]
   });
 });
 
-// === BUTTON CLICK HANDLER ===
+// ==== BUTTON HANDLER ====
+
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isButton()) return;
   if (interaction.customId !== 'propath_join') return;
@@ -57,55 +77,59 @@ client.on('interactionCreate', async (interaction) => {
   const guild = interaction.guild;
   const member = interaction.member;
 
-  // Display name: first try server nickname, then global name, then username
-  const displayName = member.nickname || member.user.globalName || member.user.username;
+  // Display name: nickname > global name > username
+  const displayName =
+    member.nickname || member.user.globalName || member.user.username;
 
-  // 1) Check if a 1:1 text channel already exists for this mentee
-  const existingChannel = guild.channels.cache.find(ch => 
-    ch.type === ChannelType.GuildText &&
-    ch.topic &&
-    ch.topic.startsWith(`MENTEE_${member.id}`)
+  // 1) Zaten bir 1:1 text channel'ı var mı?
+  const existingChannel = guild.channels.cache.find(
+    (ch) =>
+      ch.type === ChannelType.GuildText &&
+      ch.topic &&
+      ch.topic.startsWith(`MENTEE_${member.id}`)
   );
 
   if (existingChannel) {
-    await interaction.reply({ 
-      content: `You already have a 1:1 channel: ${existingChannel}.`,
-      ephemeral: true 
-    });
-    return;
-  }
-
-  // 2) If they already have the mentee role, don't let them create again
-  if (member.roles.cache.has(MENTEE_ROLE_ID)) {
     await interaction.reply({
-      content: 'You are already registered as a mentee. Please use your existing 1:1 channel or contact an admin if something is wrong.',
+      content: `You already have a 1:1 channel: ${existingChannel}.`,
       ephemeral: true
     });
     return;
   }
 
-  // 3) Give mentee role
+  // 2) Zaten mentee rolü varsa ikinci kez oluşturmaya izin verme
+  if (member.roles.cache.has(MENTEE_ROLE_ID)) {
+    await interaction.reply({
+      content:
+        'You are already registered as a mentee. Please use your existing 1:1 channel or contact an admin if something is wrong.',
+      ephemeral: true
+    });
+    return;
+  }
+
+  // 3) Mentee rolü ver
   try {
     await member.roles.add(MENTEE_ROLE_ID);
   } catch (err) {
     console.error('Error while adding mentee role:', err);
+    // Rol eklenemese bile kanalları oluşturmaya devam edelim
   }
 
-  // 4) Build base names
+  // 4) İsimleri hazırla
   const cleanName = displayName
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-') // spaces & specials -> "-"
-    .replace(/^-|-$/g, '');      // trim leading/trailing "-"
+    .replace(/[^a-z0-9]+/g, '-') // boşluk ve özel karakterleri "-" yap
+    .replace(/^-|-$/g, ''); // baştaki/sondaki "-" leri temizle
 
-  const baseChannelName = `1-1-${cleanName}`.slice(0, 90);
+  const baseChannelName = `1-1-${cleanName}`.slice(0, 90); // Discord limit güvenlik payı
   const categoryName = `1:1 - ${displayName}`;
   const channelTopic = `MENTEE_${member.id} | ${displayName}`;
 
-  // Permissions shared by category + children
+  // Kategori + alt kanallar için ortak permissionOverwrites
   const permissionOverwrites = [
     {
       id: guild.roles.everyone,
-      deny: [PermissionsBitField.Flags.ViewChannel],
+      deny: [PermissionsBitField.Flags.ViewChannel]
     },
     {
       id: member.id,
@@ -115,7 +139,7 @@ client.on('interactionCreate', async (interaction) => {
         PermissionsBitField.Flags.ReadMessageHistory,
         PermissionsBitField.Flags.AttachFiles,
         PermissionsBitField.Flags.EmbedLinks
-      ],
+      ]
     },
     {
       id: MENTOR_ROLE_ID,
@@ -123,7 +147,7 @@ client.on('interactionCreate', async (interaction) => {
         PermissionsBitField.Flags.ViewChannel,
         PermissionsBitField.Flags.SendMessages,
         PermissionsBitField.Flags.ReadMessageHistory
-      ],
+      ]
     },
     {
       id: CASEWORKER_ROLE_ID,
@@ -132,56 +156,56 @@ client.on('interactionCreate', async (interaction) => {
         PermissionsBitField.Flags.SendMessages,
         PermissionsBitField.Flags.ReadMessageHistory,
         PermissionsBitField.Flags.ManageMessages
-      ],
+      ]
     },
     {
       id: ADMIN_ROLE_ID,
       allow: [
-        PermissionsBitField.Flags.ViewChannel, 
+        PermissionsBitField.Flags.ViewChannel,
         PermissionsBitField.Flags.ManageChannels
-      ],
+      ]
     }
-  ].filter(o => o.id);
+  ].filter((o) => o.id);
 
-  // 5) Create per-mentee CATEGORY
+  // 5) Her mentee için ayrı CATEGORY oluştur
   const category = await guild.channels.create({
-    name: categoryName,                 // e.g. "1:1 - Talha Karal"
+    name: categoryName, // örn. "1:1 - Talha Karal"
     type: ChannelType.GuildCategory,
     permissionOverwrites
   });
 
-  // 6) Create TEXT channel inside that category
+  // 6) Kategori altında TEXT channel
   const textChannel = await guild.channels.create({
-    name: baseChannelName,              // e.g. "1-1-talha-karal"
+    name: baseChannelName, // örn. "1-1-talha-karal"
     type: ChannelType.GuildText,
     parent: category.id,
-    topic: channelTopic                 // contains mentee id + display name
+    topic: channelTopic
   });
 
-  // 7) Create VOICE channel inside that category
+  // 7) Kategori altında VOICE channel
   const voiceChannel = await guild.channels.create({
-    name: `${baseChannelName}-voice`,   // e.g. "1-1-talha-karal-voice"
+    name: `${baseChannelName}-voice`, // örn. "1-1-talha-karal-voice"
     type: ChannelType.GuildVoice,
     parent: category.id
   });
 
-  // 8) Send structured opening messages
+  // 8) Açılış mesajları
   const welcomeMessage = await textChannel.send(
     `Welcome ${displayName}! 👋\n\n` +
-    `This is your private 1:1 mentorship text channel.\n` +
-    `You also have a private voice channel named **${voiceChannel.name}** inside the same category.\n\n` +
-    `You can ask questions, share updates, and work with your mentor here.`
+      `This is your private 1:1 mentorship text channel.\n` +
+      `You also have a private voice channel named **${voiceChannel.name}** inside the same category.\n\n` +
+      `You can ask questions, share updates, and work with your mentor here.`
   );
   await welcomeMessage.pin();
 
   const roadmapMessage = await textChannel.send(
     `**ProPath Mentorship Roadmap**\n\n` +
-    `1️⃣ **Setup** – Understanding your background and goals\n` +
-    `2️⃣ **Preparation** – Self-discovery, career directions, and market research\n` +
-    `3️⃣ **Capability Growth** – CV, LinkedIn, and skill-building\n` +
-    `4️⃣ **Execution** – Applications, interview prep, and offer decisions\n` +
-    `5️⃣ **Sustainability** – On-the-job support and long-term career growth\n\n` +
-    `We will move through these phases together, step by step. 😊`
+      `1️⃣ **Setup** – Understanding your background and goals\n` +
+      `2️⃣ **Preparation** – Self-discovery, career directions, and market research\n` +
+      `3️⃣ **Capability Growth** – CV, LinkedIn, and skill-building\n` +
+      `4️⃣ **Execution** – Applications, interview prep, and offer decisions\n` +
+      `5️⃣ **Sustainability** – On-the-job support and long-term career growth\n\n` +
+      `We will move through these phases together, step by step. 😊`
   );
   await roadmapMessage.pin();
 
@@ -190,5 +214,7 @@ client.on('interactionCreate', async (interaction) => {
     ephemeral: true
   });
 });
+
+// ==== LOGIN ====
 
 client.login(process.env.BOT_TOKEN);
